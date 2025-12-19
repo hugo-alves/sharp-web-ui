@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import * as SPLAT from 'gsplat';
-import { getSplatUrl } from '../api/client';
+import { getSplatUrl, getCameraMetadata } from '../api/client';
 
 interface GaussianViewerProps {
   jobId: string;
@@ -12,44 +12,40 @@ const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
 
 /**
- * Custom camera controls following antimatter15/splat conventions:
- * - Horizontal drag: direct (drag right = look right)
- * - Vertical drag: inverted (drag up = look up, drag down = look down)
- * - Two-finger: pinch to zoom, drag to pan, rotate for roll
- * - Three-finger: roll/tilt
+ * Simplified camera controls: Orbit + Zoom only
+ * - Drag: Orbit around the scene
+ * - Scroll/Pinch: Zoom in/out
  */
 class NaturalCameraControls {
-  private camera: any; // Camera type doesn't expose position/rotation in typings
+  private camera: any;
   private canvas: HTMLElement;
 
   // Camera state (spherical coordinates around target)
-  private alpha = 0;      // horizontal angle (yaw)
-  private beta = 0.5;     // vertical angle (pitch), start slightly above
-  private radius = 5;     // distance from target
-  private target = { x: 0, y: 0, z: 0 };
+  private alpha = Math.PI;   // horizontal angle (yaw) - PI means facing +Z
+  private beta = 0;          // vertical angle (pitch), level
+  private radius = 2.5;      // distance from target
+  private target = { x: 0, y: 0, z: 2.5 };  // Fixed target point
 
   // Interaction state
   private isDragging = false;
-  private isPanning = false;
   private lastX = 0;
   private lastY = 0;
   private lastPinchDist = 0;
-  private lastPinchAngle = 0;
-  private rollAngle = 0;
+  private isShiftHeld = false;
 
-  // Settings
-  private orbitSpeed = 0.005;
-  private panSpeed = 0.01;
-  private zoomSpeed = 0.001;
+  // Settings - reduced sensitivity for smoother control
+  private orbitSpeed = 0.002;
+  private zoomSpeed = 0.0005;
+  private panSpeed = 0.003;
   private minRadius = 0.5;
   private maxRadius = 50;
-  private dampening = 0.1;
+  private dampening = 0.08;
 
   // Target values for smooth interpolation
-  private targetAlpha = 0;
-  private targetBeta = 0.5;
-  private targetRadius = 5;
-  private targetRoll = 0;
+  private targetAlpha = Math.PI;
+  private targetBeta = 0;
+  private targetRadius = 2.5;
+  private targetTarget = { x: 0, y: 0, z: 2.5 };
 
   constructor(camera: SPLAT.Camera, canvas: HTMLElement) {
     this.camera = camera;
@@ -57,6 +53,34 @@ class NaturalCameraControls {
 
     this.setupEventListeners();
     this.updateCamera();
+  }
+
+  // Store initial depth for reset
+  private initialDepth = 2.5;
+
+  /**
+   * Set camera to match the original input image perspective.
+   */
+  setInputImageView(targetDepth: number = 2.5) {
+    this.initialDepth = targetDepth;
+    this.alpha = Math.PI;
+    this.beta = 0;
+    this.radius = targetDepth;
+    this.target = { x: 0, y: 0, z: targetDepth };
+
+    this.targetAlpha = this.alpha;
+    this.targetBeta = this.beta;
+    this.targetRadius = this.radius;
+    this.targetTarget = { x: 0, y: 0, z: targetDepth };
+
+    this.updateCamera();
+  }
+
+  /**
+   * Reset camera to original input image perspective.
+   */
+  reset() {
+    this.setInputImageView(this.initialDepth);
   }
 
   private setupEventListeners() {
@@ -67,16 +91,31 @@ class NaturalCameraControls {
     window.addEventListener('mouseup', this.onMouseUp);
     this.canvas.addEventListener('wheel', this.onWheel, { passive: false });
 
+    // Keyboard events for Shift key
+    window.addEventListener('keydown', this.onKeyDown);
+    window.addEventListener('keyup', this.onKeyUp);
+
     // Touch events
     this.canvas.addEventListener('touchstart', this.onTouchStart, { passive: false });
     this.canvas.addEventListener('touchmove', this.onTouchMove, { passive: false });
     this.canvas.addEventListener('touchend', this.onTouchEnd);
   }
 
+  private onKeyDown = (e: KeyboardEvent) => {
+    if (e.key === 'Shift') {
+      this.isShiftHeld = true;
+    }
+  };
+
+  private onKeyUp = (e: KeyboardEvent) => {
+    if (e.key === 'Shift') {
+      this.isShiftHeld = false;
+    }
+  };
+
   private onMouseDown = (e: MouseEvent) => {
     e.preventDefault();
     this.isDragging = true;
-    this.isPanning = e.button === 2 || e.shiftKey; // Right-click or shift for pan
     this.lastX = e.clientX;
     this.lastY = e.clientY;
   };
@@ -87,7 +126,7 @@ class NaturalCameraControls {
     const dx = e.clientX - this.lastX;
     const dy = e.clientY - this.lastY;
 
-    if (this.isPanning) {
+    if (this.isShiftHeld) {
       this.pan(dx, dy);
     } else {
       this.orbit(dx, dy);
@@ -99,7 +138,6 @@ class NaturalCameraControls {
 
   private onMouseUp = () => {
     this.isDragging = false;
-    this.isPanning = false;
   };
 
   private onWheel = (e: WheelEvent) => {
@@ -111,36 +149,20 @@ class NaturalCameraControls {
     e.preventDefault();
 
     if (e.touches.length === 1) {
-      // Single finger - orbit
       this.isDragging = true;
-      this.isPanning = false;
       this.lastX = e.touches[0].clientX;
       this.lastY = e.touches[0].clientY;
     } else if (e.touches.length === 2) {
-      // Two fingers - pinch zoom + pan + roll
-      this.isDragging = true;
-      this.isPanning = true;
+      // Two fingers - pinch zoom
       const [t1, t2] = [e.touches[0], e.touches[1]];
-      this.lastX = (t1.clientX + t2.clientX) / 2;
-      this.lastY = (t1.clientY + t2.clientY) / 2;
       this.lastPinchDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
-      this.lastPinchAngle = Math.atan2(t2.clientY - t1.clientY, t2.clientX - t1.clientX);
-    } else if (e.touches.length === 3) {
-      // Three fingers - roll only
-      this.isDragging = true;
-      const touches = Array.from(e.touches);
-      const cx = touches.reduce((s, t) => s + t.clientX, 0) / 3;
-      const cy = touches.reduce((s, t) => s + t.clientY, 0) / 3;
-      this.lastPinchAngle = Math.atan2(touches[0].clientY - cy, touches[0].clientX - cx);
     }
   };
 
   private onTouchMove = (e: TouchEvent) => {
-    if (!this.isDragging) return;
     e.preventDefault();
 
     if (e.touches.length === 1) {
-      // Single finger orbit
       const dx = e.touches[0].clientX - this.lastX;
       const dy = e.touches[0].clientY - this.lastY;
       this.orbit(dx, dy);
@@ -148,92 +170,54 @@ class NaturalCameraControls {
       this.lastY = e.touches[0].clientY;
     } else if (e.touches.length === 2) {
       const [t1, t2] = [e.touches[0], e.touches[1]];
-      const centerX = (t1.clientX + t2.clientX) / 2;
-      const centerY = (t1.clientY + t2.clientY) / 2;
       const pinchDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
-      const pinchAngle = Math.atan2(t2.clientY - t1.clientY, t2.clientX - t1.clientX);
 
       // Pinch to zoom
       const zoomDelta = (this.lastPinchDist - pinchDist) * 5;
       this.zoom(zoomDelta);
 
-      // Two-finger drag to pan
-      const dx = centerX - this.lastX;
-      const dy = centerY - this.lastY;
-      this.pan(dx, dy);
-
-      // Two-finger rotation for roll
-      let deltaAngle = pinchAngle - this.lastPinchAngle;
-      while (deltaAngle > Math.PI) deltaAngle -= 2 * Math.PI;
-      while (deltaAngle < -Math.PI) deltaAngle += 2 * Math.PI;
-      this.targetRoll += deltaAngle;
-
-      this.lastX = centerX;
-      this.lastY = centerY;
       this.lastPinchDist = pinchDist;
-      this.lastPinchAngle = pinchAngle;
-    } else if (e.touches.length === 3) {
-      // Three-finger roll
-      const touches = Array.from(e.touches);
-      const cx = touches.reduce((s, t) => s + t.clientX, 0) / 3;
-      const cy = touches.reduce((s, t) => s + t.clientY, 0) / 3;
-      const currentAngle = Math.atan2(touches[0].clientY - cy, touches[0].clientX - cx);
-
-      let deltaAngle = currentAngle - this.lastPinchAngle;
-      while (deltaAngle > Math.PI) deltaAngle -= 2 * Math.PI;
-      while (deltaAngle < -Math.PI) deltaAngle += 2 * Math.PI;
-      this.targetRoll += deltaAngle;
-
-      this.lastPinchAngle = currentAngle;
     }
   };
 
   private onTouchEnd = (e: TouchEvent) => {
     if (e.touches.length === 0) {
       this.isDragging = false;
-      this.isPanning = false;
     } else if (e.touches.length === 1) {
-      // Switched from multi-touch to single touch
-      this.isPanning = false;
       this.lastX = e.touches[0].clientX;
       this.lastY = e.touches[0].clientY;
     } else if (e.touches.length === 2) {
       const [t1, t2] = [e.touches[0], e.touches[1]];
-      this.lastX = (t1.clientX + t2.clientX) / 2;
-      this.lastY = (t1.clientY + t2.clientY) / 2;
       this.lastPinchDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
-      this.lastPinchAngle = Math.atan2(t2.clientY - t1.clientY, t2.clientX - t1.clientX);
     }
   };
 
   private orbit(dx: number, dy: number) {
-    // Horizontal: drag right = look right (direct)
     this.targetAlpha += dx * this.orbitSpeed;
-
-    // Vertical: drag up = look up (inverted Y - this is the key!)
-    // Negative because screen Y increases downward
     this.targetBeta -= dy * this.orbitSpeed;
-
-    // Clamp vertical angle to avoid gimbal lock
-    this.targetBeta = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, this.targetBeta));
+    this.targetBeta = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, this.targetBeta));
   }
 
   private pan(dx: number, dy: number) {
-    const speed = this.panSpeed * this.radius;
-
-    // Calculate right and up vectors from camera orientation
-    const cosA = Math.cos(this.alpha);
-    const sinA = Math.sin(this.alpha);
+    // Calculate right and up vectors based on current camera orientation
+    const cosAlpha = Math.cos(this.alpha);
+    const sinAlpha = Math.sin(this.alpha);
+    const cosBeta = Math.cos(this.beta);
 
     // Right vector (perpendicular to view direction in XZ plane)
-    const rightX = cosA;
-    const rightZ = sinA;
+    const rightX = cosAlpha;
+    const rightZ = -sinAlpha;
 
-    // Up vector (always Y-up for simplicity)
-    // Move target opposite to drag direction for natural feel
-    this.target.x -= dx * speed * rightX;
-    this.target.z -= dx * speed * rightZ;
-    this.target.y += dy * speed;
+    // Up vector (Y is up, adjusted for pitch)
+    const upY = cosBeta;
+
+    // Scale by radius for consistent feel at different zoom levels
+    const scale = this.panSpeed * this.radius;
+
+    // Move target position
+    this.targetTarget.x -= dx * scale * rightX;
+    this.targetTarget.z -= dx * scale * rightZ;
+    this.targetTarget.y += dy * scale * upY;
   }
 
   private zoom(delta: number) {
@@ -242,52 +226,39 @@ class NaturalCameraControls {
   }
 
   update() {
-    // Smooth interpolation
     this.alpha += (this.targetAlpha - this.alpha) * this.dampening;
     this.beta += (this.targetBeta - this.beta) * this.dampening;
     this.radius += (this.targetRadius - this.radius) * this.dampening;
-    this.rollAngle += (this.targetRoll - this.rollAngle) * this.dampening;
-
+    this.target.x += (this.targetTarget.x - this.target.x) * this.dampening;
+    this.target.y += (this.targetTarget.y - this.target.y) * this.dampening;
+    this.target.z += (this.targetTarget.z - this.target.z) * this.dampening;
     this.updateCamera();
   }
 
   private updateCamera() {
-    // Convert spherical to Cartesian
     const cosBeta = Math.cos(this.beta);
     const x = this.target.x + this.radius * cosBeta * Math.sin(this.alpha);
     const y = this.target.y + this.radius * Math.sin(this.beta);
     const z = this.target.z + this.radius * cosBeta * Math.cos(this.alpha);
 
-    // Set camera position
     this.camera.position.x = x;
     this.camera.position.y = y;
     this.camera.position.z = z;
 
-    // Calculate look-at rotation with roll
-    // First, get the direction to target
     const dx = this.target.x - x;
     const dy = this.target.y - y;
     const dz = this.target.z - z;
 
-    // Calculate pitch and yaw from direction
     const pitch = Math.atan2(dy, Math.sqrt(dx * dx + dz * dz));
     const yaw = Math.atan2(dx, dz);
 
-    // Create rotation quaternion (yaw, pitch, roll)
-    // Using ZYX order: roll around Z, then pitch around X, then yaw around Y
     const cy = Math.cos(yaw / 2), sy = Math.sin(yaw / 2);
     const cp = Math.cos(-pitch / 2), sp = Math.sin(-pitch / 2);
-    const cr = Math.cos(this.rollAngle / 2), sr = Math.sin(this.rollAngle / 2);
 
-    const qw = cr * cp * cy + sr * sp * sy;
-    const qx = sr * cp * cy - cr * sp * sy;
-    const qy = cr * sp * cy + sr * cp * sy;
-    const qz = cr * cp * sy - sr * sp * cy;
-
-    this.camera.rotation.x = qx;
-    this.camera.rotation.y = qy;
-    this.camera.rotation.z = qz;
-    this.camera.rotation.w = qw;
+    this.camera.rotation.x = -sp * cy;
+    this.camera.rotation.y = sp * sy;
+    this.camera.rotation.z = cp * sy;
+    this.camera.rotation.w = cp * cy;
   }
 
   dispose() {
@@ -295,6 +266,8 @@ class NaturalCameraControls {
     window.removeEventListener('mousemove', this.onMouseMove);
     window.removeEventListener('mouseup', this.onMouseUp);
     this.canvas.removeEventListener('wheel', this.onWheel);
+    window.removeEventListener('keydown', this.onKeyDown);
+    window.removeEventListener('keyup', this.onKeyUp);
     this.canvas.removeEventListener('touchstart', this.onTouchStart);
     this.canvas.removeEventListener('touchmove', this.onTouchMove);
     this.canvas.removeEventListener('touchend', this.onTouchEnd);
@@ -361,11 +334,16 @@ export function GaussianViewer({ jobId, className = '' }: GaussianViewerProps) {
       setIsPseudoFullscreen(prev => !prev);
       // Trigger resize after state change
       setTimeout(() => {
-        if (rendererRef.current && containerRef.current) {
-          rendererRef.current.setSize(
-            containerRef.current.clientWidth,
-            containerRef.current.clientHeight
-          );
+        if (rendererRef.current && containerRef.current && cameraRef.current) {
+          const width = containerRef.current.clientWidth;
+          const height = containerRef.current.clientHeight;
+          rendererRef.current.setSize(width, height);
+
+          // Update camera aspect ratio
+          const camera = cameraRef.current as any;
+          if (camera.data) {
+            camera.data.setSize(width, height);
+          }
         }
       }, 50);
       return;
@@ -451,10 +429,16 @@ export function GaussianViewer({ jobId, className = '' }: GaussianViewerProps) {
         const splatUrl = getSplatUrl(jobId);
         console.log('Loading splat from:', splatUrl);
 
-        // Fetch and load the splat using SPLAT.Loader (for .splat format)
-        await SPLAT.Loader.LoadAsync(splatUrl, scene, (progress) => {
-          console.log('Loading progress:', Math.round(progress * 100) + '%');
-        });
+        // Fetch camera metadata and load splat in parallel
+        const [_, cameraData] = await Promise.all([
+          SPLAT.Loader.LoadAsync(splatUrl, scene, (progress) => {
+            console.log('Loading progress:', Math.round(progress * 100) + '%');
+          }),
+          getCameraMetadata(jobId).catch(err => {
+            console.warn('Could not fetch camera metadata:', err);
+            return null;
+          })
+        ]);
 
         if (disposed) {
           renderer.dispose();
@@ -468,6 +452,12 @@ export function GaussianViewer({ jobId, className = '' }: GaussianViewerProps) {
         }
 
         console.log('Loaded splat successfully');
+
+        // Set camera to match input image perspective
+        // The target depth determines how far into the scene we look
+        // A reasonable default is 2-3 units, but we can adjust based on the scene
+        controls.setInputImageView(2.5);
+        console.log('Camera set to input image perspective');
 
         // Animation loop
         const frame = () => {
@@ -509,19 +499,33 @@ export function GaussianViewer({ jobId, className = '' }: GaussianViewerProps) {
     };
   }, [jobId]);
 
-  // Handle resize
+  // Handle resize - update both renderer and camera aspect ratio
   useEffect(() => {
     const handleResize = () => {
-      if (rendererRef.current && containerRef.current) {
-        rendererRef.current.setSize(
-          containerRef.current.clientWidth,
-          containerRef.current.clientHeight
-        );
+      if (rendererRef.current && containerRef.current && cameraRef.current) {
+        const width = containerRef.current.clientWidth;
+        const height = containerRef.current.clientHeight;
+        rendererRef.current.setSize(width, height);
+
+        // Update camera aspect ratio to prevent distortion
+        const camera = cameraRef.current as any;
+        if (camera.data) {
+          camera.data.setSize(width, height);
+        }
       }
     };
 
     window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+
+    // Also handle fullscreen changes
+    document.addEventListener('fullscreenchange', handleResize);
+    document.addEventListener('webkitfullscreenchange', handleResize);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      document.removeEventListener('fullscreenchange', handleResize);
+      document.removeEventListener('webkitfullscreenchange', handleResize);
+    };
   }, []);
 
   if (error) {
@@ -588,23 +592,23 @@ export function GaussianViewer({ jobId, className = '' }: GaussianViewerProps) {
         </div>
       )}
 
-      {/* Controls help - different for mobile vs desktop */}
-      {!loading && !isMobile && (
-        <div className="absolute bottom-3 right-3 bg-black/60 text-white text-xs px-2 py-1 rounded space-y-0.5 z-20">
-          <div className="font-medium text-gray-300 mb-1">Controls</div>
-          <div>Drag: Orbit</div>
-          <div>Right-drag/Shift: Pan</div>
-          <div>Scroll: Zoom</div>
-          <div className="border-t border-white/20 mt-1 pt-1">F: Fullscreen</div>
-        </div>
+      {/* Reset button */}
+      {!loading && (
+        <button
+          onClick={() => controlsRef.current?.reset()}
+          className="absolute top-3 left-3 bg-black/70 hover:bg-black/90 text-white text-xs px-3 py-2 rounded-lg transition-colors z-20"
+          title="Reset to original view"
+        >
+          Reset View
+        </button>
       )}
 
-      {/* Mobile controls help - simplified */}
-      {!loading && isMobile && !isInFullscreen && (
+      {/* Controls help */}
+      {!loading && !isInFullscreen && (
         <div className="absolute bottom-3 right-3 bg-black/60 text-white text-xs px-2 py-1 rounded z-20">
-          <div>1 finger: Orbit</div>
-          <div>2 fingers: Zoom + Pan + Roll</div>
-          <div>3 fingers: Roll only</div>
+          <div>Drag: Orbit</div>
+          {!isMobile && <div>Shift+Drag: Pan</div>}
+          <div>{isMobile ? 'Pinch' : 'Scroll'}: Zoom</div>
         </div>
       )}
     </div>

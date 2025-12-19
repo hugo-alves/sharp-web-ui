@@ -16,7 +16,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
-from predictor import SHARPPredictor
+# Make predictor optional for testing without ML dependencies
+try:
+    from predictor import SHARPPredictor
+    HAS_PREDICTOR = True
+except ImportError as e:
+    print(f"Warning: Could not import predictor ({e}). Upload/processing disabled.")
+    SHARPPredictor = None
+    HAS_PREDICTOR = False
 
 app = FastAPI(title="SHARP Web UI", version="1.0.0")
 
@@ -121,7 +128,10 @@ async def startup_event():
     """Load SHARP model and existing jobs on startup."""
     global predictor
     load_jobs()
-    predictor = SHARPPredictor.get_instance()
+    if HAS_PREDICTOR:
+        predictor = SHARPPredictor.get_instance()
+    else:
+        print("Running in viewer-only mode (no ML processing available)")
 
 
 def process_image(job_id: str, image_path: Path, output_path: Path):
@@ -129,6 +139,9 @@ def process_image(job_id: str, image_path: Path, output_path: Path):
     global predictor, jobs
 
     try:
+        if not HAS_PREDICTOR or predictor is None:
+            raise RuntimeError("ML processing not available - running in viewer-only mode")
+
         jobs[job_id].status = JobStatus.PROCESSING
         save_jobs()
 
@@ -399,6 +412,101 @@ async def get_thumbnail(job_id: str):
             return FileResponse(image_path)
 
     raise HTTPException(status_code=404, detail="Image not found")
+
+
+@app.get("/api/camera/{job_id}")
+async def get_camera_metadata(job_id: str):
+    """Get camera metadata from PLY file for viewer initialization.
+
+    Returns intrinsics, extrinsics, and image size so the viewer can
+    display the SPLAT from the same perspective as the original image.
+    """
+    if job_id not in jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    job = jobs[job_id]
+    if job.status != JobStatus.COMPLETED:
+        raise HTTPException(status_code=400, detail="Job not completed")
+
+    output_path = OUTPUT_DIR / f"{job_id}.ply"
+    if not output_path.exists():
+        raise HTTPException(status_code=404, detail="Output file not found")
+
+    from plyfile import PlyData
+    import numpy as np
+
+    ply_data = PlyData.read(output_path)
+
+    # Extract supplementary camera data from PLY
+    supplement_data = {}
+    for element in ply_data.elements:
+        if element.name == "intrinsic":
+            supplement_data["intrinsic"] = np.asarray(element["intrinsic"])
+        elif element.name == "extrinsic":
+            supplement_data["extrinsic"] = np.asarray(element["extrinsic"])
+        elif element.name == "image_size":
+            supplement_data["image_size"] = np.asarray(element["image_size"])
+
+    # Parse intrinsics (3x3 matrix stored as 9 elements)
+    intrinsics = supplement_data.get("intrinsic", np.array([512, 0, 320, 0, 512, 240, 0, 0, 1]))
+    if len(intrinsics) == 9:
+        intrinsics_matrix = intrinsics.reshape((3, 3))
+        focal_x = float(intrinsics_matrix[0, 0])
+        focal_y = float(intrinsics_matrix[1, 1])
+        cx = float(intrinsics_matrix[0, 2])
+        cy = float(intrinsics_matrix[1, 2])
+    else:
+        # Legacy format
+        focal_x = float(intrinsics[0]) if len(intrinsics) > 0 else 512
+        focal_y = float(intrinsics[1]) if len(intrinsics) > 1 else 512
+        cx = float(intrinsics[2]) if len(intrinsics) > 2 else 320
+        cy = float(intrinsics[3]) if len(intrinsics) > 3 else 240
+
+    # Parse extrinsics (4x4 matrix stored as 16 elements)
+    extrinsics = supplement_data.get("extrinsic", np.eye(4).flatten())
+    extrinsics_matrix = np.eye(4)
+    if len(extrinsics) == 16:
+        extrinsics_matrix = extrinsics.reshape((4, 4))
+    elif len(extrinsics) == 12:
+        extrinsics_matrix[:3] = extrinsics.reshape((3, 4))
+
+    # Parse image size
+    image_size = supplement_data.get("image_size", np.array([640, 480]))
+    width = int(image_size[0])
+    height = int(image_size[1])
+
+    # Calculate vertical field of view from focal length
+    # FOV = 2 * atan(sensor_size / (2 * focal_length))
+    fov_y = float(2 * np.arctan(height / (2 * focal_y)))
+    fov_x = float(2 * np.arctan(width / (2 * focal_x)))
+
+    # Extract camera position from extrinsics (inverse of camera transform)
+    # For identity extrinsics, camera is at origin looking down +Z
+    camera_position = extrinsics_matrix[:3, 3].tolist()
+
+    # Extract rotation (first 3x3 block)
+    rotation_matrix = extrinsics_matrix[:3, :3].tolist()
+
+    return {
+        "intrinsics": {
+            "focal_x": focal_x,
+            "focal_y": focal_y,
+            "principal_x": cx,
+            "principal_y": cy,
+        },
+        "extrinsics": {
+            "position": camera_position,
+            "rotation": rotation_matrix,
+        },
+        "image_size": {
+            "width": width,
+            "height": height,
+        },
+        "fov": {
+            "horizontal": fov_x,
+            "vertical": fov_y,
+        }
+    }
 
 
 @app.delete("/api/jobs/{job_id}")

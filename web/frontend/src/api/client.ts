@@ -49,6 +49,27 @@ export interface PreviewData {
   total_gaussians: number;
 }
 
+export interface CameraMetadata {
+  intrinsics: {
+    focal_x: number;
+    focal_y: number;
+    principal_x: number;
+    principal_y: number;
+  };
+  extrinsics: {
+    position: number[];
+    rotation: number[][];
+  };
+  image_size: {
+    width: number;
+    height: number;
+  };
+  fov: {
+    horizontal: number;
+    vertical: number;
+  };
+}
+
 export async function uploadImages(files: File[]): Promise<Job[]> {
   const formData = new FormData();
   files.forEach((file) => {
@@ -76,6 +97,11 @@ export async function listJobs(): Promise<Job[]> {
 
 export async function getPreviewData(jobId: string): Promise<PreviewData> {
   const response = await api.get(`/preview/${jobId}`);
+  return response.data;
+}
+
+export async function getCameraMetadata(jobId: string): Promise<CameraMetadata> {
+  const response = await api.get(`/camera/${jobId}`);
   return response.data;
 }
 
