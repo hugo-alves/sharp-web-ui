@@ -53,7 +53,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const response = await fetch(url.toString(), {
       method: req.method,
       headers,
-      body,
+      body: body ? new Uint8Array(body) : undefined,
     });
 
     // Forward response headers
