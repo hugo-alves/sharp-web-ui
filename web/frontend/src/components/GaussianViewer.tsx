@@ -430,7 +430,7 @@ export function GaussianViewer({ jobId, className = '' }: GaussianViewerProps) {
         console.log('Loading splat from:', splatUrl);
 
         // Fetch camera metadata and load splat in parallel
-        const [_, cameraData] = await Promise.all([
+        const [_splatResult, _cameraData] = await Promise.all([
           SPLAT.Loader.LoadAsync(splatUrl, scene, (progress) => {
             console.log('Loading progress:', Math.round(progress * 100) + '%');
           }),
