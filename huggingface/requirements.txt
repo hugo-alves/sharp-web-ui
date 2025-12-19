@@ -1,0 +1,6 @@
+# SHARP from GitHub
+git+https://github.com/apple/ml-sharp.git
+
+# Gradio
+gradio>=4.0.0
+spaces
