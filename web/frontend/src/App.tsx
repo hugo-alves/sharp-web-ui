@@ -85,36 +85,39 @@ function App() {
   const completedCount = jobs.filter((j) => j.status === 'completed').length;
 
   return (
-    <div className="min-h-screen bg-gray-100">
+    <div className="min-h-screen bg-gray-100 overflow-x-hidden">
       <header className="bg-white shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">SHARP</h1>
-              <p className="text-sm text-gray-500">
+            <div className="min-w-0">
+              <h1 className="text-xl sm:text-2xl font-bold text-gray-900">SHARP</h1>
+              <p className="text-xs sm:text-sm text-gray-500 truncate">
                 Single-image 3D Gaussian Splat Generation
               </p>
             </div>
 
             {completedCount > 0 && (
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 sm:gap-3">
                 <a
                   href={getDownloadAllUrl()}
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                  className="inline-flex items-center justify-center gap-2 px-3 py-2.5 sm:px-4 sm:py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium touch-manipulation"
+                  style={{ minHeight: '44px' }}
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                   </svg>
-                  Download All ({completedCount})
+                  <span className="hidden sm:inline">Download All ({completedCount})</span>
+                  <span className="sm:hidden">{completedCount}</span>
                 </a>
                 <button
                   onClick={handleClearAll}
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors text-sm font-medium"
+                  className="inline-flex items-center justify-center gap-2 px-3 py-2.5 sm:px-4 sm:py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors text-sm font-medium touch-manipulation"
+                  style={{ minHeight: '44px' }}
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                   </svg>
-                  Clear All
+                  <span className="hidden sm:inline">Clear All</span>
                 </button>
               </div>
             )}
@@ -170,7 +173,7 @@ function App() {
                 </div>
                 <GaussianViewer
                   jobId={selectedJob.id}
-                  className="h-[500px]"
+                  className="h-[60vh] min-h-[300px] max-h-[500px] sm:h-[400px] lg:h-[500px]"
                 />
                 <div className="px-4 py-3 border-t border-gray-200 bg-gray-50">
                   <a
@@ -185,7 +188,7 @@ function App() {
                 </div>
               </div>
             ) : (
-              <div className="bg-white rounded-xl shadow-sm border border-gray-200 h-[500px] flex items-center justify-center">
+              <div className="bg-white rounded-xl shadow-sm border border-gray-200 h-[60vh] min-h-[300px] max-h-[500px] sm:h-[400px] lg:h-[500px] flex items-center justify-center">
                 <div className="text-center text-gray-400">
                   <svg className="w-16 h-16 mx-auto mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2-1M4 7l2 1M4 7v2.5M12 21l-2-1m2 1l2-1m-2 1v-2.5M6 18l-2-1v-2.5M18 18l2-1v-2.5" />

@@ -62,7 +62,7 @@ export function ImageUploader({ onUploadComplete }: ImageUploaderProps) {
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       className={`
-        relative border-2 border-dashed rounded-xl p-12 text-center
+        relative border-2 border-dashed rounded-xl p-6 sm:p-8 md:p-12 text-center
         transition-all duration-200 cursor-pointer
         ${isDragging
           ? 'border-blue-500 bg-blue-50'
@@ -83,7 +83,7 @@ export function ImageUploader({ onUploadComplete }: ImageUploaderProps) {
       <div className="space-y-4">
         <div className="flex justify-center">
           <svg
-            className={`w-16 h-16 ${isDragging ? 'text-blue-500' : 'text-gray-400'}`}
+            className={`w-12 h-12 sm:w-16 sm:h-16 ${isDragging ? 'text-blue-500' : 'text-gray-400'}`}
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"

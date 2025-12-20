@@ -153,11 +153,18 @@ class NaturalCameraControls {
       this.lastX = e.touches[0].clientX;
       this.lastY = e.touches[0].clientY;
     } else if (e.touches.length === 2) {
-      // Two fingers - pinch zoom
+      // Two fingers - pinch zoom and pan
       const [t1, t2] = [e.touches[0], e.touches[1]];
       this.lastPinchDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+      // Initialize midpoint for pan tracking
+      this.lastMidX = (t1.clientX + t2.clientX) / 2;
+      this.lastMidY = (t1.clientY + t2.clientY) / 2;
     }
   };
+
+  // Track midpoint for two-finger pan
+  private lastMidX = 0;
+  private lastMidY = 0;
 
   private onTouchMove = (e: TouchEvent) => {
     e.preventDefault();
@@ -172,23 +179,47 @@ class NaturalCameraControls {
       const [t1, t2] = [e.touches[0], e.touches[1]];
       const pinchDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
 
+      // Calculate midpoint between two fingers
+      const midX = (t1.clientX + t2.clientX) / 2;
+      const midY = (t1.clientY + t2.clientY) / 2;
+
+      // Two-finger pan (based on midpoint movement)
+      if (this.lastMidX !== 0 && this.lastMidY !== 0) {
+        const panDx = midX - this.lastMidX;
+        const panDy = midY - this.lastMidY;
+        // Only pan if the gesture is more pan-like than pinch-like
+        if (Math.abs(panDx) > 2 || Math.abs(panDy) > 2) {
+          this.pan(panDx, panDy);
+        }
+      }
+
       // Pinch to zoom
       const zoomDelta = (this.lastPinchDist - pinchDist) * 5;
       this.zoom(zoomDelta);
 
       this.lastPinchDist = pinchDist;
+      this.lastMidX = midX;
+      this.lastMidY = midY;
     }
   };
 
   private onTouchEnd = (e: TouchEvent) => {
     if (e.touches.length === 0) {
       this.isDragging = false;
+      // Reset midpoint tracking
+      this.lastMidX = 0;
+      this.lastMidY = 0;
     } else if (e.touches.length === 1) {
       this.lastX = e.touches[0].clientX;
       this.lastY = e.touches[0].clientY;
+      // Reset midpoint tracking when going from 2 to 1 finger
+      this.lastMidX = 0;
+      this.lastMidY = 0;
     } else if (e.touches.length === 2) {
       const [t1, t2] = [e.touches[0], e.touches[1]];
       this.lastPinchDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+      this.lastMidX = (t1.clientX + t2.clientX) / 2;
+      this.lastMidY = (t1.clientY + t2.clientY) / 2;
     }
   };
 
@@ -596,8 +627,9 @@ export function GaussianViewer({ jobId, className = '' }: GaussianViewerProps) {
       {!loading && (
         <button
           onClick={() => controlsRef.current?.reset()}
-          className="absolute top-3 left-3 bg-black/70 hover:bg-black/90 text-white text-xs px-3 py-2 rounded-lg transition-colors z-20"
+          className="absolute top-3 left-3 bg-black/70 hover:bg-black/90 text-white text-xs px-4 py-3 sm:px-3 sm:py-2 rounded-lg transition-colors z-20 touch-manipulation"
           title="Reset to original view"
+          style={{ minWidth: '44px', minHeight: '44px' }}
         >
           Reset View
         </button>
@@ -606,8 +638,8 @@ export function GaussianViewer({ jobId, className = '' }: GaussianViewerProps) {
       {/* Controls help */}
       {!loading && !isInFullscreen && (
         <div className="absolute bottom-3 right-3 bg-black/60 text-white text-xs px-2 py-1 rounded z-20">
-          <div>Drag: Orbit</div>
-          {!isMobile && <div>Shift+Drag: Pan</div>}
+          <div>{isMobile ? '1 Finger' : 'Drag'}: Orbit</div>
+          <div>{isMobile ? '2 Fingers' : 'Shift+Drag'}: Pan</div>
           <div>{isMobile ? 'Pinch' : 'Scroll'}: Zoom</div>
         </div>
       )}

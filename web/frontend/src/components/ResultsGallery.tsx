@@ -90,7 +90,7 @@ export function ResultsGallery({
             Results ({completedJobs.length})
           </h3>
 
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
             {completedJobs.map((job) => (
               <div
                 key={job.id}
@@ -123,24 +123,24 @@ export function ResultsGallery({
                   )}
                 </div>
 
-                <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="absolute top-2 right-2 flex gap-1 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                   <button
                     onClick={() => onSelectJob(job)}
-                    className="p-2 bg-white/90 hover:bg-white rounded-lg shadow-sm text-gray-600 hover:text-blue-600"
+                    className="p-3 sm:p-2 bg-white/90 hover:bg-white rounded-lg shadow-sm text-gray-600 hover:text-blue-600 touch-manipulation"
                     title="View 3D"
                   >
                     <ViewIcon />
                   </button>
                   <button
                     onClick={(e) => handleDownload(e, job.id)}
-                    className="p-2 bg-white/90 hover:bg-white rounded-lg shadow-sm text-gray-600 hover:text-green-600"
+                    className="p-3 sm:p-2 bg-white/90 hover:bg-white rounded-lg shadow-sm text-gray-600 hover:text-green-600 touch-manipulation"
                     title="Download PLY"
                   >
                     <DownloadIcon />
                   </button>
                   <button
                     onClick={(e) => handleDelete(e, job.id)}
-                    className="p-2 bg-white/90 hover:bg-white rounded-lg shadow-sm text-gray-600 hover:text-red-600"
+                    className="p-3 sm:p-2 bg-white/90 hover:bg-white rounded-lg shadow-sm text-gray-600 hover:text-red-600 touch-manipulation"
                     title="Delete"
                   >
                     <TrashIcon />
