@@ -66,6 +66,34 @@ sharp predict -i /path/to/input/images -o /path/to/output/gaussians --render
 sharp render -i /path/to/output/gaussians -o /path/to/output/renderings
 ```
 
+## Web UI
+
+A web interface is available for running SHARP without any coding. Upload an image and explore the 3D result directly in your browser.
+
+**[Live Demo](https://frontend-woad-nu-76.vercel.app)**
+
+### Architecture
+
+- **Frontend**: React + TypeScript hosted on Vercel, with [gsplat.js](https://github.com/huggingface/gsplat.js) for real-time 3D rendering
+- **Backend**: FastAPI on [Modal](https://modal.com) with serverless T4 GPU (scales to zero when idle)
+
+### Running Locally
+
+```bash
+# Frontend
+cd web/frontend
+npm install
+npm run dev
+
+# Backend (requires Modal account)
+cd web/modal
+pip install modal
+modal token new
+modal serve app.py
+```
+
+See [web/README.md](web/README.md) for detailed deployment instructions.
+
 ## Evaluation
 
 Please refer to the paper for both quantitative and qualitative evaluations.
